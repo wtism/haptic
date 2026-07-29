@@ -1,0 +1,16 @@
+# 環境設定（サーバーのWebルート外 .env を使用）
+.env
+.env.*
+
+# ログ（顧客情報を含むため除外）
+/logs/*.log
+
+# 生成物（クーポンQRコード等）
+/qrcodes/*.png
+
+# phpqrcodeライブラリのキャッシュ
+/lib/phpqrcode/cache/
+
+# バックアップファイル
+*.bak
+*.bak*
