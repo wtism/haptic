@@ -93,7 +93,7 @@ $purchases = $stmt->fetchAll();
 // 在庫アラート
 $stockAlerts = $db->query("
     SELECT * FROM products
-    WHERE is_active=1 AND status='active' AND stock <= stock_alert
+    WHERE is_active=1 AND status='active' AND alert_enabled=1 AND stock <= stock_alert
     ORDER BY item_type, stock ASC
 ")->fetchAll();
 
@@ -209,10 +209,13 @@ include __DIR__ . '/_header.php';
                     <?php if ($p['maker']): ?><span style="color:#888;font-size:0.78em;"> /<?= h($p['maker']) ?></span><?php endif; ?>
                 </td>
                 <td>
-                    <?php $sc = $p['stock'] <= 0 ? '#f8d7da;color:#721c24' : ($p['stock'] <= $p['stock_alert'] ? '#fff3cd;color:#856404' : '#d4edda;color:#155724'); ?>
+                    <?php $sc = empty($p['alert_enabled'])
+                        ? '#e9ecef;color:#6c757d'
+                        : ($p['stock'] <= 0 ? '#f8d7da;color:#721c24' : ($p['stock'] <= $p['stock_alert'] ? '#fff3cd;color:#856404' : '#d4edda;color:#155724')); ?>
                     <span style="background:<?= $sc ?>;padding:2px 8px;border-radius:10px;font-size:0.85em;font-weight:bold;">
                         <?= $p['stock'] ?><?= h($p['unit']) ?>
                     </span>
+                    <?php if (empty($p['alert_enabled'])): ?><span title="在庫アラートOFF" style="font-size:0.85em;">🔕</span><?php endif; ?>
                 </td>
                 <td>
                     <form method="post" style="display:inline-flex;gap:4px;align-items:center;">
