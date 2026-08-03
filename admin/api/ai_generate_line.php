@@ -11,10 +11,11 @@ header('Content-Type: application/json; charset=utf-8');
 $input = json_decode(file_get_contents('php://input'), true);
 if (!$input) { http_response_code(400); echo json_encode(['error' => 'invalid input']); exit; }
 
-$purpose = trim($input['purpose'] ?? '');
-$tone    = trim($input['tone']    ?? 'フレンドリー・親しみやすい');
-$extra   = trim($input['extra']   ?? '');
-$ref     = trim($input['ref']     ?? '');
+$purpose     = trim($input['purpose'] ?? '');
+$tone        = trim($input['tone']    ?? 'フレンドリー・親しみやすい');
+$extra       = trim($input['extra']   ?? '');
+$ref         = trim($input['ref']     ?? '');
+$isBroadcast = !empty($input['broadcast']); // true: 一斉配信用（個人名の変数を使わない）
 
 if (!$purpose) { http_response_code(400); echo json_encode(['error' => '用途・シーンは必須です']); exit; }
 
@@ -35,10 +36,14 @@ $prompt = "あなたは{$shopName}のLINEメッセージ文章のプロです。
 if ($extra !== '') $prompt .= "\n【含めたい要素】{$extra}";
 if ($ref   !== '') $prompt .= "\n【参考文章（この文体・雰囲気に寄せてください）】\n{$ref}";
 
+$nameRule = $isBroadcast
+    ? '- 全員に一斉配信する文章です。個人名や{name}のような変数は使わず、「皆様」「お客様」など全員向けの宛名にしてください'
+    : '- {name} という変数はお客様の名前に置換されます。冒頭で「{name}様」と使ってください';
+
 $prompt .= "
 
 ルール：
-- {name} という変数はお客様の名前に置換されます。冒頭で「{name}様」と使ってください
+{$nameRule}
 - 絵文字を適度に使い、LINEらしい温かみのある文章にする
 - 200文字前後
 - 文章のみ出力し、説明・前置き・タイトルは一切不要";

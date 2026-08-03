@@ -511,7 +511,15 @@ input[readonly], input[disabled] { background: #f8f9fb; color: var(--muted); }
             </div>
         </div>
 
-        <a href="<?= adminUrl('broadcast.php') ?>" class="nav-link <?= $currentPage==='broadcast.php'?'active':'' ?>">📢 配信</a>
+        <div class="nav-dropdown">
+            <button class="nav-dropdown-btn <?= in_array($currentPage,['broadcast.php','scenarios.php'])?'active':'' ?>">
+                📢 配信 <span style="font-size:0.7em;opacity:0.7;">▼</span>
+            </button>
+            <div class="nav-dropdown-menu">
+                <a href="<?= adminUrl('broadcast.php') ?>">📢 一斉配信</a>
+                <a href="<?= adminUrl('scenarios.php') ?>">📆 シナリオ配信</a>
+            </div>
+        </div>
 
         <div class="nav-right">
             <div style="display:flex;align-items:center;gap:8px;">

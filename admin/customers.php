@@ -165,20 +165,22 @@ if ($customerId) {
                 $tmplStmt = $db->prepare("SELECT * FROM coupon_templates WHERE name LIKE '%紹介%' AND is_active=1 LIMIT 1");
                 $tmplStmt->execute();
                 $refTmpl = $tmplStmt->fetch();
-                $refDiscount = $refTmpl ? $refTmpl['discount'] : 500;
+                $refDiscount     = $refTmpl ? (int)$refTmpl['discount'] : 500;
+                $refDiscountType = $refTmpl ? ($refTmpl['discount_type'] ?? 'amount') : 'amount';
+                $refDiscountRate = $refDiscountType === 'percent' ? (int)($refTmpl['discount_rate'] ?? 0) : null;
                 $refDesc     = $refTmpl ? $refTmpl['description'] : '紹介クーポン';
                 $refDays     = $refTmpl ? $refTmpl['valid_days'] : 60;
                 $refExpired  = date('Y-m-d', strtotime("+{$refDays} days"));
 
                 // 紹介してくれた人（referrerId）にクーポン
                 $code1 = strtoupper(substr(md5(uniqid('ref1', true)), 0, 8));
-                $db->prepare('INSERT INTO coupons (customer_id, code, description, discount, coupon_type, expired_at, created_by) VALUES (?,?,?,?,?,?,?)')
-                   ->execute([$referrerId, $code1, $refDesc, $refDiscount, 'referral', $refExpired, currentAdminId()]);
+                $db->prepare('INSERT INTO coupons (customer_id, code, description, discount, discount_type, discount_rate, coupon_type, expired_at, created_by) VALUES (?,?,?,?,?,?,?,?,?)')
+                   ->execute([$referrerId, $code1, $refDesc, $refDiscount, $refDiscountType, $refDiscountRate, 'referral', $refExpired, currentAdminId()]);
 
                 // 紹介された人（customerId）にもクーポン
                 $code2 = strtoupper(substr(md5(uniqid('ref2', true)), 0, 8));
-                $db->prepare('INSERT INTO coupons (customer_id, code, description, discount, coupon_type, expired_at, created_by) VALUES (?,?,?,?,?,?,?)')
-                   ->execute([$customerId, $code2, $refDesc, $refDiscount, 'referral', $refExpired, currentAdminId()]);
+                $db->prepare('INSERT INTO coupons (customer_id, code, description, discount, discount_type, discount_rate, coupon_type, expired_at, created_by) VALUES (?,?,?,?,?,?,?,?,?)')
+                   ->execute([$customerId, $code2, $refDesc, $refDiscount, $refDiscountType, $refDiscountRate, 'referral', $refExpired, currentAdminId()]);
 
                 // LINE通知（両者・QRコード付き）
                 require_once dirname(__DIR__) . '/lib/line.php';

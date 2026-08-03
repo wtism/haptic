@@ -143,9 +143,9 @@ try {
         json_encode($snapshot, JSON_UNESCAPED_UNICODE), $note, $rid,
     ]);
 
-    // リマインドを取り直し（前日18時）
+    // リマインドを取り直し（前日18時15分）
     $db->prepare('DELETE FROM reminders WHERE reservation_id = ? AND sent_flag = 0')->execute([$rid]);
-    $prevDay = date('Y-m-d', strtotime($date . ' -1 day')) . ' 18:00:00';
+    $prevDay = date('Y-m-d', strtotime($date . ' -1 day')) . ' 18:15:00';
     if (strtotime($prevDay) > time()) {
         $db->prepare('INSERT INTO reminders (reservation_id, send_at) VALUES (?,?)')->execute([$rid, $prevDay]);
     }

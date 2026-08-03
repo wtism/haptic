@@ -217,11 +217,20 @@ if ($receiptRow) {
     $riStmt->execute([$receiptRow['id']]);
     $receiptItems = $riStmt->fetchAll();
 }
+// 未使用のクーポンに加え、QR等で先に「使用済み」になったが
+// まだどの会計にも紐づいていないクーポンも選択肢に含める
+// （会計画面を開く前にQRを使われても、ここで手動選択して割引を反映できるようにするため）
 $availCouponsForRegister = $db->prepare('
-    SELECT * FROM coupons WHERE customer_id=? AND used_at IS NULL
-    AND (expired_at IS NULL OR expired_at > NOW()) ORDER BY issued_at DESC
+    SELECT * FROM coupons
+    WHERE customer_id = ?
+      AND (
+          (used_at IS NULL AND (expired_at IS NULL OR expired_at > NOW()))
+          OR (used_at IS NOT NULL AND used_reservation_id IS NULL)
+          OR used_reservation_id = ?
+      )
+    ORDER BY (used_at IS NOT NULL), issued_at DESC
 ');
-$availCouponsForRegister->execute([$r['customer_id']]);
+$availCouponsForRegister->execute([$r['customer_id'], $id]);
 $availCouponsForRegister = $availCouponsForRegister->fetchAll();
 
 $pageTitle = '予約詳細 #' . $id;
@@ -246,10 +255,20 @@ include __DIR__ . '/_header.php';
 <div class="alert alert-<?= str_starts_with($msg, '❌') ? 'danger' : 'success' ?>"><?= h($msg) ?></div>
 <?php endif; ?>
 
+<style>
+@media (max-width: 768px) {
+    .rd-main-grid    { grid-template-columns: 1fr !important; }
+    .rd-form-grid    { grid-template-columns: 1fr !important; }
+    .rd-summary-grid { grid-template-columns: 1fr !important; }
+    /* レジ明細テーブル：列幅%指定をSPでは無効化して横スクロールに任せる */
+    .rd-items-table th, .rd-items-table td { white-space: nowrap; }
+}
+</style>
+
 <!-- ========================================================
-  メインレイアウト：左1fr / 右2fr
+  メインレイアウト：左1fr / 右2fr（SPでは1カラムに）
 ========================================================= -->
-<div style="display:grid;grid-template-columns:1fr 2fr;gap:20px;align-items:start;">
+<div class="rd-main-grid" style="display:grid;grid-template-columns:1fr 2fr;gap:20px;align-items:start;">
 
 <!-- ===== 左カラム ===== -->
 <div style="display:flex;flex-direction:column;gap:16px;">
@@ -320,7 +339,7 @@ include __DIR__ . '/_header.php';
         <form method="post" class="edit-only">
             <input type="hidden" name="csrf_token" value="<?= csrf() ?>">
             <input type="hidden" name="action" value="update">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div class="rd-form-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
                 <div class="form-group"><label>日付</label><input type="date" name="date" value="<?= h(date('Y-m-d', strtotime($r['start_at']))) ?>" required></div>
                 <div class="form-group"><label>開始時間</label><input type="time" name="time" value="<?= h(date('H:i', strtotime($r['start_at']))) ?>" required></div>
             </div>
@@ -381,25 +400,34 @@ include __DIR__ . '/_header.php';
 <!-- ============================================================ -->
 <!-- 💰 レジ・会計 -->
 <!-- ============================================================ -->
-<div class="card">
+<?php $regPaid = $receiptRow && $receiptRow['status'] === 'paid'; ?>
+<div class="card" id="registerCard">
     <?php
     $regBg = '#f0f7f4'; // デフォルト：薄緑
-    if ($receiptRow && $receiptRow['status'] === 'paid') $regBg = '#fce4ec'; // 会計済み：薄ピンク
+    if ($regPaid) $regBg = '#fce4ec'; // 会計済み：薄ピンク
     if ($r['status'] === 'cancelled') $regBg = '#e3f2fd'; // キャンセル：薄青
     ?>
     <div class="card-header" style="background:<?= $regBg ?>;">
-        💰 レジ・会計
-        <?php if ($receiptRow && $receiptRow['status']==='paid'): ?>
-        <span style="background:#e91e63;color:#fff;padding:2px 10px;border-radius:10px;font-size:0.78em;">✅ 会計確定済み</span>
-        <?php endif; ?>
-        <?php if ($r['status'] === 'cancelled'): ?>
-        <span style="background:#1976d2;color:#fff;padding:2px 10px;border-radius:10px;font-size:0.78em;">キャンセル</span>
+        <div>
+            💰 レジ・会計
+            <?php if ($regPaid): ?>
+            <span style="background:#e91e63;color:#fff;padding:2px 10px;border-radius:10px;font-size:0.78em;">✅ 会計確定済み</span>
+            <?php endif; ?>
+            <?php if ($r['status'] === 'cancelled'): ?>
+            <span style="background:#1976d2;color:#fff;padding:2px 10px;border-radius:10px;font-size:0.78em;">キャンセル</span>
+            <?php endif; ?>
+        </div>
+        <?php if ($regPaid): ?>
+        <div>
+            <button class="btn btn-sm btn-secondary view-only" onclick="unlockRegisterEdit()">✏️ 編集する</button>
+            <button class="btn btn-sm btn-secondary edit-only" onclick="cancelRegisterEdit()">キャンセル</button>
+        </div>
         <?php endif; ?>
     </div>
     <div class="card-body" style="padding:0;">
 
         <!-- 明細テーブル -->
-        <table style="width:100%;border-collapse:collapse;font-size:0.9em;">
+        <table class="rd-items-table" style="width:100%;border-collapse:collapse;font-size:0.9em;">
             <thead>
                 <tr style="background:#f8fdf8;">
                     <th style="padding:8px 10px;text-align:left;width:30%;">種別</th>
@@ -407,34 +435,47 @@ include __DIR__ . '/_header.php';
                     <th style="padding:8px 10px;text-align:right;width:15%;">単価</th>
                     <th style="padding:8px 10px;text-align:center;width:10%;">数量</th>
                     <th style="padding:8px 10px;text-align:right;width:12%;">小計</th>
-                    <?php if (!$receiptRow || $receiptRow['status']!=='paid'): ?>
                     <th style="padding:8px 10px;width:32px;"></th>
-                    <?php endif; ?>
                 </tr>
             </thead>
             <tbody id="regItemsBody"><!-- JSで描画 --></tbody>
         </table>
 
-        <?php if (!$receiptRow || $receiptRow['status']!=='paid'): ?>
         <!-- 行追加ボタン -->
-        <div style="padding:10px 12px;border-top:1px solid #eee;">
+        <div class="edit-only" style="padding:10px 12px;border-top:1px solid #eee;">
             <button class="btn btn-sm btn-secondary" onclick="regAddRow()" style="font-size:0.85em;">＋ 行を追加</button>
         </div>
-        <?php endif; ?>
 
         <!-- クーポン・値引き・合計エリア -->
         <div style="border-top:2px solid #e8f0ed;padding:14px 16px;background:<?= $regBg ?>;">
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+            <div class="rd-summary-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
                 <!-- 左：クーポン・値引き・支払い -->
                 <div>
-                    <?php if (!$receiptRow || $receiptRow['status']!=='paid'): ?>
+                    <div class="edit-only">
                     <div style="margin-bottom:10px;">
                         <label style="font-size:0.83em;color:#666;display:block;margin-bottom:3px;">🎫 クーポン</label>
                         <select id="regCoupon" onchange="regCalc()" style="width:100%;padding:5px 8px;border:1px solid #ddd;border-radius:6px;font-size:0.85em;">
                             <option value="">使用しない</option>
-                            <?php foreach ($availCouponsForRegister as $cp): ?>
-                            <option value="<?= $cp['id'] ?>" data-amount="<?= $cp['discount'] ?>" <?= ($receiptRow && $receiptRow['coupon_id']==$cp['id'])?'selected':'' ?>>
-                                <?= h($cp['description']) ?> -¥<?= number_format($cp['discount']) ?>
+                            <?php
+                            // 会計にまだクーポンが選ばれていなければ、QR等で使用済み・未紐付けのものを自動で仮選択
+                            $cpAutoSelectId = null;
+                            if (!$receiptRow || !$receiptRow['coupon_id']) {
+                                foreach ($availCouponsForRegister as $cp) {
+                                    if ($cp['used_at'] && !$cp['used_reservation_id']) { $cpAutoSelectId = $cp['id']; break; }
+                                }
+                            }
+                            foreach ($availCouponsForRegister as $cp):
+                                $cpIsPercent  = ($cp['discount_type'] ?? 'amount') === 'percent';
+                                $cpLabel      = $cpIsPercent ? ($cp['discount_rate'] . '% OFF') : ('-¥' . number_format($cp['discount']));
+                                $cpUsedUnlinked = $cp['used_at'] && !$cp['used_reservation_id'];
+                                $cpSelected   = ($receiptRow && $receiptRow['coupon_id'] == $cp['id']) || ((!$receiptRow || !$receiptRow['coupon_id']) && $cp['id'] == $cpAutoSelectId);
+                            ?>
+                            <option value="<?= $cp['id'] ?>"
+                                data-amount="<?= $cp['discount'] ?>"
+                                data-type="<?= h($cp['discount_type'] ?? 'amount') ?>"
+                                data-rate="<?= (int)($cp['discount_rate'] ?? 0) ?>"
+                                <?= $cpSelected ? 'selected' : '' ?>>
+                                <?= h($cp['description']) ?> <?= $cpLabel ?><?= $cpUsedUnlinked ? '（使用済み・QR照合済み）' : '' ?>
                             </option>
                             <?php endforeach; ?>
                         </select>
@@ -454,30 +495,42 @@ include __DIR__ . '/_header.php';
                             <option value="other"   <?= ($receiptRow['payment_method']??'')==='other'   ?'selected':'' ?>>その他</option>
                         </select>
                     </div>
-                    <?php else: ?>
+                    </div>
+                    <?php if ($regPaid): ?>
+                    <div class="view-only">
                     <table style="font-size:0.88em;width:100%;">
                         <tr><td style="color:#888;padding:3px 0;">支払方法</td><td><?= ['cash'=>'💴 現金','card'=>'💳 カード','paypay'=>'📱 PayPay','line_pay'=>'💚 LINE Pay','other'=>'その他'][$receiptRow['payment_method']] ?? '-' ?></td></tr>
                         <?php if ($receiptRow['coupon_amount']): ?><tr><td style="color:#888;padding:3px 0;">クーポン</td><td>-¥<?= number_format($receiptRow['coupon_amount']) ?></td></tr><?php endif; ?>
                         <?php if ($receiptRow['discount_amount']): ?><tr><td style="color:#888;padding:3px 0;">値引き</td><td>-¥<?= number_format($receiptRow['discount_amount']) ?></td></tr><?php endif; ?>
                         <tr><td style="color:#888;padding:3px 0;">確定日時</td><td><?= date('Y/m/d H:i', strtotime($receiptRow['confirmed_at'])) ?></td></tr>
                     </table>
+                    </div>
                     <?php endif; ?>
                 </div>
                 <!-- 右：合計 -->
                 <div style="display:flex;flex-direction:column;justify-content:space-between;">
                     <div>
-                        <div style="display:flex;justify-content:space-between;font-size:0.88em;padding:3px 0;"><span style="color:#888;">小計</span><span id="regSumSubtotal">¥0</span></div>
-                        <div style="display:flex;justify-content:space-between;font-size:0.88em;padding:3px 0;"><span style="color:#888;">消費税（内税）</span><span id="regSumTax">¥0</span></div>
-                        <div style="display:flex;justify-content:space-between;font-size:0.88em;padding:3px 0;"><span style="color:#888;">クーポン</span><span id="regSumCoupon" style="color:#e74c3c;">-¥0</span></div>
-                        <div style="display:flex;justify-content:space-between;font-size:0.88em;padding:3px 0;"><span style="color:#888;">値引き</span><span id="regSumDiscount" style="color:#e74c3c;">-¥0</span></div>
-                        <div style="display:flex;justify-content:space-between;font-size:1.2em;font-weight:bold;padding:8px 0 0;border-top:2px solid #2d7a5f;margin-top:6px;"><span>合計</span><span id="regSumTotal" style="color:#2d7a5f;">¥0</span></div>
+                        <?php if ($regPaid): ?>
+                        <div class="view-only">
+                            <div style="display:flex;justify-content:space-between;font-size:0.88em;padding:3px 0;"><span style="color:#888;">小計</span><span>¥<?= number_format($receiptRow['subtotal']) ?></span></div>
+                            <div style="display:flex;justify-content:space-between;font-size:0.88em;padding:3px 0;"><span style="color:#888;">消費税（内税）</span><span>¥<?= number_format($receiptRow['tax_amount']) ?></span></div>
+                            <div style="display:flex;justify-content:space-between;font-size:0.88em;padding:3px 0;"><span style="color:#888;">クーポン</span><span style="color:#e74c3c;">-¥<?= number_format($receiptRow['coupon_amount']) ?></span></div>
+                            <div style="display:flex;justify-content:space-between;font-size:0.88em;padding:3px 0;"><span style="color:#888;">値引き</span><span style="color:#e74c3c;">-¥<?= number_format($receiptRow['discount_amount']) ?></span></div>
+                            <div style="display:flex;justify-content:space-between;font-size:1.2em;font-weight:bold;padding:8px 0 0;border-top:2px solid #2d7a5f;margin-top:6px;"><span>合計</span><span style="color:#2d7a5f;">¥<?= number_format($receiptRow['total']) ?></span></div>
+                        </div>
+                        <?php endif; ?>
+                        <div class="edit-only">
+                            <div style="display:flex;justify-content:space-between;font-size:0.88em;padding:3px 0;"><span style="color:#888;">小計</span><span id="regSumSubtotal">¥0</span></div>
+                            <div style="display:flex;justify-content:space-between;font-size:0.88em;padding:3px 0;"><span style="color:#888;">消費税（内税）</span><span id="regSumTax">¥0</span></div>
+                            <div style="display:flex;justify-content:space-between;font-size:0.88em;padding:3px 0;"><span style="color:#888;">クーポン</span><span id="regSumCoupon" style="color:#e74c3c;">-¥0</span></div>
+                            <div style="display:flex;justify-content:space-between;font-size:0.88em;padding:3px 0;"><span style="color:#888;">値引き</span><span id="regSumDiscount" style="color:#e74c3c;">-¥0</span></div>
+                            <div style="display:flex;justify-content:space-between;font-size:1.2em;font-weight:bold;padding:8px 0 0;border-top:2px solid #2d7a5f;margin-top:6px;"><span>合計</span><span id="regSumTotal" style="color:#2d7a5f;">¥0</span></div>
+                        </div>
                     </div>
-                    <?php if (!$receiptRow || $receiptRow['status']!=='paid'): ?>
-                    <div style="margin-top:12px;display:flex;flex-direction:column;gap:6px;">
-                        <button class="btn" style="background:#2d7a5f;color:#fff;width:100%;padding:9px;font-weight:bold;" onclick="regSave('pay')">✅ 会計確定</button>
+                    <div class="edit-only" style="margin-top:12px;display:flex;flex-direction:column;gap:6px;">
+                        <button class="btn" style="background:#2d7a5f;color:#fff;width:100%;padding:9px;font-weight:bold;" onclick="regSave('pay')"><?= $regPaid ? '✅ 変更を保存して再確定' : '✅ 会計確定' ?></button>
                         <button class="btn btn-secondary" style="width:100%;padding:7px;" onclick="regSave('save')">💾 一時保存</button>
                     </div>
-                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -587,7 +640,25 @@ include __DIR__ . '/_header.php';
 // ============================================================
 const REG_RESERVATION_ID = <?= $id ?>;
 const REG_CSRF           = '<?= csrf() ?>';
-const REG_IS_PAID        = <?= ($receiptRow && $receiptRow['status']==='paid') ? 'true' : 'false' ?>;
+let REG_IS_PAID          = <?= ($receiptRow && $receiptRow['status']==='paid') ? 'true' : 'false' ?>;
+const REG_WAS_PAID       = REG_IS_PAID; // 元々会計確定済みだったか（キャンセル時の復元用）
+
+// 会計確定済みの内容を再編集できるようにする
+function unlockRegisterEdit() {
+    if (!confirm('会計確定済みの内容を編集します。保存し直すまでは確定されません。よろしいですか？')) return;
+    REG_IS_PAID = false;
+    setMode('registerCard', 'edit');
+    regRenderItems();
+    regCalc();
+}
+function cancelRegisterEdit() {
+    if (REG_WAS_PAID) {
+        location.reload(); // 未保存の変更は破棄して元の確定内容に戻す
+        return;
+    }
+    REG_IS_PAID = false;
+    setMode('registerCard', 'edit');
+}
 let regAllMenus       = [];
 let regAllProducts    = [];
 let regItems          = [];
@@ -788,8 +859,13 @@ function regCalc() {
         tax      += Math.round(s * item.tax_rate / (1 + item.tax_rate));
     });
     const couponEl  = document.getElementById('regCoupon');
-    const couponAmt = couponEl && couponEl.selectedIndex > 0
-        ? parseInt(couponEl.options[couponEl.selectedIndex].dataset.amount) || 0 : 0;
+    let couponAmt   = 0;
+    if (couponEl && couponEl.selectedIndex > 0) {
+        const opt = couponEl.options[couponEl.selectedIndex];
+        couponAmt = opt.dataset.type === 'percent'
+            ? Math.round(subtotal * (parseInt(opt.dataset.rate) || 0) / 100)
+            : (parseInt(opt.dataset.amount) || 0);
+    }
     const discount  = parseInt(document.getElementById('regDiscount')?.value) || 0;
     const total     = Math.max(0, subtotal - couponAmt - discount);
     document.getElementById('regSumSubtotal').textContent = '¥' + subtotal.toLocaleString();
@@ -870,10 +946,14 @@ function regEscHtml(s) {
 
         // なければ追加して選択
         if (!found) {
+            const isPercent = coupon.discount_type === 'percent';
             const opt = document.createElement('option');
             opt.value = coupon.id;
             opt.dataset.amount = coupon.discount;
-            opt.textContent = coupon.description + ' -¥' + coupon.discount.toLocaleString() + '（' + coupon.code + '）';
+            opt.dataset.type   = coupon.discount_type || 'amount';
+            opt.dataset.rate   = coupon.discount_rate || 0;
+            const label = isPercent ? (coupon.discount_rate + '% OFF') : ('-¥' + coupon.discount.toLocaleString());
+            opt.textContent = coupon.description + ' ' + label + '（' + coupon.code + '）';
             sel.appendChild(opt);
             sel.value = coupon.id;
         }
@@ -955,6 +1035,8 @@ function setMode(cardId, mode) {
 }
 document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.card').forEach(c => c.classList.add('view-mode'));
+    // レジ・会計カードのみ：未会計確定なら初期状態を編集モードにする
+    if (!REG_IS_PAID) setMode('registerCard', 'edit');
 });
 function openCustomerModal(customerId) {
     document.getElementById('customerModal').style.display = 'flex';

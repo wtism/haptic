@@ -108,12 +108,41 @@ try {
 
     // 会計確定時：クーポン使用済みに＆予約ステータスをcompletedに
     if ($action === 'pay') {
+        // 再編集でクーポンが変更・解除された場合、この予約に紐づいていた旧クーポンは使用済みを解除する
+        $db->prepare('
+            UPDATE coupons SET used_at = NULL, used_reservation_id = NULL
+            WHERE used_reservation_id = ? AND id <> ?
+        ')->execute([$reservationId, $couponId ?: 0]);
+
         if ($couponId) {
             $db->prepare('UPDATE coupons SET used_at=NOW(), used_reservation_id=? WHERE id=?')
                ->execute([$reservationId, $couponId]);
         }
         $db->prepare('UPDATE reservations SET status="completed", updated_at=NOW() WHERE id=?')
            ->execute([$reservationId]);
+
+        // 物販明細をproduct_salesへ反映（月次集計・購入履歴・補充リマインドで参照されるため）
+        $resStmt = $db->prepare('SELECT customer_id, start_at FROM reservations WHERE id=?');
+        $resStmt->execute([$reservationId]);
+        $resInfo = $resStmt->fetch();
+
+        // 再会計に備えて、この予約に紐づく既存分は一旦削除してから作り直す
+        $db->prepare('DELETE FROM product_sales WHERE reservation_id=?')->execute([$reservationId]);
+
+        if ($resInfo) {
+            $soldAt = date('Y-m-d', strtotime($resInfo['start_at']));
+            $psStmt = $db->prepare('
+                INSERT INTO product_sales (customer_id, product_id, reservation_id, quantity, price, sold_at, remind_enabled, created_by)
+                VALUES (?,?,?,?,?,?,0,?)
+            ');
+            foreach ($calcItems as $ci) {
+                if ($ci['item_type'] !== 'product') continue;
+                $psStmt->execute([
+                    $resInfo['customer_id'], $ci['item_id'], $reservationId,
+                    $ci['quantity'], $ci['unit_price'], $soldAt, currentAdminId(),
+                ]);
+            }
+        }
     }
 
     $db->commit();

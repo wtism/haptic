@@ -206,9 +206,52 @@ include __DIR__ . '/_header.php';
 
             <!-- テキスト入力（共通） -->
             <div id="section_text" class="form-group">
-                <label>メッセージ本文 <span style="color:#888;font-weight:normal;font-size:0.85em;">絵文字使用可</span></label>
+                <label style="display:flex;align-items:center;justify-content:space-between;">
+                    <span>メッセージ本文 <span style="color:#888;font-weight:normal;font-size:0.85em;">絵文字使用可</span></span>
+                    <button type="button" onclick="toggleBcAiPanel()"
+                        style="display:flex;align-items:center;gap:4px;padding:3px 10px;border:1px solid #a78bfa;border-radius:6px;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;font-size:0.8em;cursor:pointer;">
+                        ✨ AIで作成
+                    </button>
+                </label>
                 <textarea name="message_text" id="messageText" rows="6" placeholder="メッセージを入力...&#10;&#10;😊絵文字もそのまま貼り付けられます"></textarea>
                 <div style="text-align:right;font-size:0.8em;color:#888;margin-top:4px;"><span id="charCount">0</span>文字</div>
+            </div>
+
+            <!-- AIパネル（配信用：シナリオはクイック選択＋自由入力） -->
+            <div id="bcAiPanel" style="display:none;background:#f8f7ff;border:1px solid #e0d7ff;border-radius:8px;padding:14px;margin-bottom:14px;">
+                <div style="font-size:0.85em;font-weight:600;color:#764ba2;margin-bottom:10px;">✨ AI文章生成</div>
+
+                <div style="font-size:0.78em;color:#888;margin-bottom:5px;">よく使うシーン</div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+                    <?php foreach ([
+                        '新メニューのご案内', 'キャンペーン・割引告知', '季節のご挨拶',
+                        '再来店促進（久しくご来店のない方へ）', '空き枠のご案内', '休業日のお知らせ',
+                    ] as $scene): ?>
+                    <button type="button" class="bc-scene-btn" onclick="pickBcScene(this)"
+                        style="padding:5px 11px;border:1px solid #ddd;border-radius:14px;background:#fff;font-size:0.78em;cursor:pointer;"><?= $scene ?></button>
+                    <?php endforeach; ?>
+                </div>
+
+                <div style="margin-bottom:8px;">
+                    <input type="text" id="bcAiPurpose" placeholder="用途・シーン（上のボタンから選ぶか、自由に入力）"
+                        style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;box-sizing:border-box;font-size:0.88em;">
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">
+                    <?php foreach (['フレンドリー','丁寧・上品','明るく元気','感謝を込めて'] as $tone): ?>
+                    <button type="button" class="bc-tone-btn" data-tone="<?= $tone ?>" onclick="selectBcTone(this)"
+                        style="padding:4px 10px;border:1px solid #ddd;border-radius:14px;background:#fff;font-size:0.8em;cursor:pointer;"><?= $tone ?></button>
+                    <?php endforeach; ?>
+                </div>
+                <div style="margin-bottom:8px;">
+                    <input type="text" id="bcAiExtra" placeholder="補足（任意）：クーポン案内を含める、など"
+                        style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;box-sizing:border-box;font-size:0.88em;">
+                </div>
+                <button type="button" onclick="generateBcAi()" id="bcAiBtn"
+                    style="width:100%;padding:8px;border:none;border-radius:6px;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;font-size:0.88em;font-weight:bold;cursor:pointer;">
+                    <span id="bcAiBtnText">✨ 生成する</span>
+                </button>
+                <div id="bcAiError" style="display:none;margin-top:8px;padding:8px 10px;background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;color:#b91c1c;font-size:0.82em;"></div>
+                <div style="font-size:0.75em;color:#aaa;margin-top:8px;">※ 一斉配信は全員に同じ文章が届くため、個人名は入りません（「皆様」等の宛名になります）</div>
             </div>
 
             <!-- 画像設定 -->
@@ -370,6 +413,60 @@ function updatePreview() {
     const pvBtn = document.getElementById('pvBtn');
     if (btn) { pvBtn.style.display = ''; pvBtn.querySelector('span').textContent = btn; }
     else { pvBtn.style.display = 'none'; }
+}
+
+// ── AI文章生成（配信用） ──────────────────────────────
+let _bcAiTone = '';
+
+function toggleBcAiPanel() {
+    const panel = document.getElementById('bcAiPanel');
+    panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+    if (panel.style.display === 'block') document.getElementById('bcAiPurpose').focus();
+}
+function pickBcScene(btn) {
+    document.getElementById('bcAiPurpose').value = btn.textContent;
+    document.querySelectorAll('.bc-scene-btn').forEach(b => {
+        const active = b === btn;
+        b.style.background  = active ? 'linear-gradient(135deg,#667eea,#764ba2)' : '#fff';
+        b.style.borderColor  = active ? '#667eea' : '#ddd';
+        b.style.color       = active ? '#fff' : '#333';
+    });
+}
+function selectBcTone(btn) {
+    _bcAiTone = btn.dataset.tone;
+    document.querySelectorAll('.bc-tone-btn').forEach(b => {
+        const active = b === btn;
+        b.style.background  = active ? 'linear-gradient(135deg,#667eea,#764ba2)' : '#fff';
+        b.style.borderColor = active ? '#667eea' : '#ddd';
+        b.style.color       = active ? '#fff' : '#333';
+    });
+}
+async function generateBcAi() {
+    const purpose = document.getElementById('bcAiPurpose').value.trim();
+    if (!purpose) { document.getElementById('bcAiPurpose').focus(); return; }
+    const btn = document.getElementById('bcAiBtn');
+    const txt = document.getElementById('bcAiBtnText');
+    txt.textContent = '⏳ 生成中...'; btn.disabled = true;
+    document.getElementById('bcAiError').style.display = 'none';
+    const tone  = _bcAiTone || 'フレンドリー';
+    const extra = document.getElementById('bcAiExtra').value.trim();
+    const ref   = document.getElementById('messageText').value.trim();
+    try {
+        const res = await fetch('<?= adminUrl('api/ai_generate_line.php') ?>', {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ purpose, tone, extra, ref, broadcast: true })
+        });
+        const data = await res.json();
+        if (!data.success) throw new Error(data.error || '生成失敗');
+        document.getElementById('messageText').value = data.text;
+        counter.textContent = data.text.length;
+        document.getElementById('bcAiPanel').style.display = 'none';
+    } catch (e) {
+        document.getElementById('bcAiError').textContent = '生成失敗：' + e.message;
+        document.getElementById('bcAiError').style.display = 'block';
+    } finally {
+        txt.textContent = '✨ 生成する'; btn.disabled = false;
+    }
 }
 </script>
 

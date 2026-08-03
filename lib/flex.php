@@ -4,6 +4,55 @@
 // ============================================================
 
 /**
+ * クーポンカード（QR付き）- 管理画面からの個別送信・誕生日クーポン等で使用
+ */
+function flexCouponCard(array $coupon, ?string $qrUrl, string $title = '🎫 クーポン'): array
+{
+    $discountLabel = ($coupon['discount_type'] ?? 'amount') === 'percent'
+        ? ($coupon['discount_rate'] ?? 0) . '% OFF'
+        : '¥' . number_format($coupon['discount'] ?? 0) . ' OFF';
+
+    $body = [
+        ['type' => 'text', 'text' => $coupon['description'] ?? 'クーポン', 'weight' => 'bold', 'size' => 'lg', 'wrap' => true],
+        ['type' => 'separator', 'margin' => 'md'],
+        ['type' => 'box', 'layout' => 'horizontal', 'margin' => 'md',
+         'contents' => [
+            ['type' => 'text', 'text' => '💰 割引', 'size' => 'sm', 'color' => '#888888', 'flex' => 2],
+            ['type' => 'text', 'text' => $discountLabel, 'size' => 'sm', 'weight' => 'bold', 'flex' => 3],
+         ]],
+    ];
+    if (!empty($coupon['expired_at'])) {
+        $body[] = ['type' => 'box', 'layout' => 'horizontal', 'margin' => 'sm',
+             'contents' => [
+                ['type' => 'text', 'text' => '📅 有効期限', 'size' => 'sm', 'color' => '#888888', 'flex' => 2],
+                ['type' => 'text', 'text' => date('Y年m月d日', strtotime($coupon['expired_at'])) . 'まで', 'size' => 'sm', 'weight' => 'bold', 'flex' => 3],
+             ]];
+    }
+    $body[] = ['type' => 'separator', 'margin' => 'md'];
+    if ($qrUrl) {
+        $body[] = ['type' => 'image', 'url' => $qrUrl, 'size' => 'md', 'aspectRatio' => '1:1', 'aspectMode' => 'fit', 'margin' => 'md', 'align' => 'center'];
+        $body[] = ['type' => 'text', 'text' => 'ご来店時にQRコードをスタッフにご提示ください', 'size' => 'xs', 'color' => '#888888', 'wrap' => true, 'align' => 'center', 'margin' => 'sm'];
+    }
+    $body[] = ['type' => 'text', 'text' => $coupon['code'] ?? '', 'size' => 'lg', 'weight' => 'bold', 'align' => 'center', 'margin' => 'md', 'color' => '#E8746A'];
+
+    return [
+        'type'    => 'flex',
+        'altText' => "{$title}（" . ($coupon['code'] ?? '') . '）',
+        'contents' => [
+            'type'   => 'bubble',
+            'styles' => ['header' => ['backgroundColor' => '#E8746A']],
+            'header' => [
+                'type' => 'box', 'layout' => 'vertical',
+                'contents' => [
+                    ['type' => 'text', 'text' => $title, 'color' => '#ffffff', 'weight' => 'bold', 'size' => 'xl'],
+                ],
+            ],
+            'body' => ['type' => 'box', 'layout' => 'vertical', 'contents' => $body],
+        ],
+    ];
+}
+
+/**
  * LIFF予約画面への誘導ボタン
  */
 function flexLiffBooking(string $liffUrl): array

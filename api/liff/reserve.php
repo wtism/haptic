@@ -142,8 +142,8 @@ try {
     ]);
     $rid = (int)$db->lastInsertId();
 
-    // 前日18時リマインド
-    $prevDay = date('Y-m-d', strtotime($date . ' -1 day')) . ' 18:00:00';
+    // 前日18時15分リマインド
+    $prevDay = date('Y-m-d', strtotime($date . ' -1 day')) . ' 18:15:00';
     if (strtotime($prevDay) > time()) {
         $db->prepare('INSERT INTO reminders (reservation_id, send_at) VALUES (?,?)')->execute([$rid, $prevDay]);
     }

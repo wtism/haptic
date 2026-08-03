@@ -42,7 +42,11 @@ function liffBookingUrl(): ?string
 // Cron処理（セッションタイムアウト）
 // ============================================================
 if (isset($_GET['cron']) && $_GET['cron'] === env('CRON_SECRET', 'irodori_cron_2024')) {
-    handleCronTimeout();
+    if (($_GET['job'] ?? '') === 'scenario') {
+        handleScenarioBatch();
+    } else {
+        handleCronTimeout();
+    }
     exit;
 }
 
@@ -327,6 +331,69 @@ function handleCronTimeout(): void
     }
 
     echo date('Y-m-d H:i:s') . " - reminded:{$reminded}, reset:{$reset}, checked:" . count($sessions) . ", reminder_sent:{$reminderSent}, birthday:{$bdaySent}, sale_remind:{$saleReminderSent}" . PHP_EOL;
+}
+
+// ============================================================
+// シナリオ配信（来店後◎ヶ月／購入後◎ヶ月）
+// 1日1回・時間帯を指定して実行するための独立ジョブ
+// （5分おきの通常cronに混ぜると深夜等にも送られてしまうため分離）
+// ============================================================
+function handleScenarioBatch(): void
+{
+    $db = db();
+    $scenarioSent = 0;
+    $scenarios = $db->query("SELECT * FROM line_scenarios WHERE is_active = 1")->fetchAll();
+
+    foreach ($scenarios as $sc) {
+        if ($sc['trigger_type'] === 'visit') {
+            $targets = $db->prepare("
+                SELECT r.id AS source_id, r.customer_id, c.name, c.line_user_id
+                FROM reservations r
+                JOIN customers c ON r.customer_id = c.id
+                WHERE r.status = 'completed'
+                  AND c.line_user_id IS NOT NULL
+                  AND DATE_ADD(r.start_at, INTERVAL ? MONTH) <= NOW()
+                  AND NOT EXISTS (
+                      SELECT 1 FROM line_scenario_logs l
+                      WHERE l.scenario_id = ? AND l.source_type = 'reservation' AND l.source_id = r.id
+                  )
+            ");
+            $targets->execute([(int)$sc['months_after'], $sc['id']]);
+            $sourceType = 'reservation';
+        } else {
+            $targets = $db->prepare("
+                SELECT ps.id AS source_id, ps.customer_id, c.name, c.line_user_id
+                FROM product_sales ps
+                JOIN customers c ON ps.customer_id = c.id
+                WHERE c.line_user_id IS NOT NULL
+                  AND DATE_ADD(ps.sold_at, INTERVAL ? MONTH) <= NOW()
+                  AND NOT EXISTS (
+                      SELECT 1 FROM line_scenario_logs l
+                      WHERE l.scenario_id = ? AND l.source_type = 'product_sale' AND l.source_id = ps.id
+                  )
+            ");
+            $targets->execute([(int)$sc['months_after'], $sc['id']]);
+            $sourceType = 'product_sale';
+        }
+
+        foreach ($targets->fetchAll() as $t) {
+            $name = $t['name'] ? $t['name'] . '様' : 'お客様';
+            $text = str_replace('{name}', $name, $sc['message_text']);
+            try {
+                linePush($t['line_user_id'], [textMessage($text)]);
+            } catch (Throwable $e) {
+                writeLog('ERROR', 'Scenario send failed: ' . $e->getMessage());
+                continue; // 送信失敗時はログに残さず次回リトライ
+            }
+            $db->prepare('
+                INSERT INTO line_scenario_logs (scenario_id, customer_id, source_type, source_id)
+                VALUES (?,?,?,?)
+            ')->execute([$sc['id'], $t['customer_id'], $sourceType, $t['source_id']]);
+            $scenarioSent++;
+        }
+    }
+
+    echo date('Y-m-d H:i:s') . " - scenario_sent:{$scenarioSent}" . PHP_EOL;
 }
 
 // ============================================================
@@ -1234,12 +1301,12 @@ function handleBookingConfirm(string $lineUserId, array $customer, array $sessio
         $note,
     ]);
 
-    // リマインドキューに登録（前日18時）
+    // リマインドキューに登録（前日18時15分）
     $reservationDate = date('Y-m-d', strtotime($startAt));
-    $sendAt          = $reservationDate . ' 18:00:00';
-    $prevDay         = date('Y-m-d', strtotime($reservationDate . ' -1 day')) . ' 18:00:00';
+    $sendAt          = $reservationDate . ' 18:15:00';
+    $prevDay         = date('Y-m-d', strtotime($reservationDate . ' -1 day')) . ' 18:15:00';
 
-    // 前日18時が未来であれば登録
+    // 前日18時15分が未来であれば登録
     if (strtotime($prevDay) > time()) {
         $sendAt = $prevDay;
     } else {

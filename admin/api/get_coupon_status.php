@@ -19,7 +19,7 @@ $db = db();
 
 // 直近10秒以内に使用済みになった・かつまだレジに紐付いていないクーポンを取得
 $stmt = $db->prepare('
-    SELECT id, code, description, discount
+    SELECT id, code, description, discount, discount_type, discount_rate
     FROM coupons
     WHERE customer_id = ?
       AND used_at IS NOT NULL
@@ -33,9 +33,11 @@ $coupon = $stmt->fetch(PDO::FETCH_ASSOC);
 
 echo json_encode([
     'coupon' => $coupon ? [
-        'id'          => (int)$coupon['id'],
-        'code'        => $coupon['code'],
-        'description' => $coupon['description'],
-        'discount'    => (int)$coupon['discount'],
+        'id'            => (int)$coupon['id'],
+        'code'          => $coupon['code'],
+        'description'   => $coupon['description'],
+        'discount'      => (int)$coupon['discount'],
+        'discount_type' => $coupon['discount_type'] ?? 'amount',
+        'discount_rate' => $coupon['discount_rate'] !== null ? (int)$coupon['discount_rate'] : null,
     ] : null
 ], JSON_UNESCAPED_UNICODE);

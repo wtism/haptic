@@ -37,6 +37,18 @@
                 <div style="text-align:right;font-size:0.78em;color:#aaa;margin-top:2px;"><span id="glmCount">0</span>文字</div>
             </div>
 
+            <div class="form-group">
+                <label style="display:flex;align-items:center;gap:6px;cursor:pointer;">
+                    <input type="checkbox" id="glmCouponToggle" onchange="toggleGlmCouponPanel()"> 🎫 クーポンを添付する
+                </label>
+            </div>
+            <div id="glmCouponPanel" style="display:none;background:#fff8f0;border:1px solid #f0d9b5;border-radius:8px;padding:14px;margin-bottom:14px;">
+                <select id="glmCouponSelect" style="width:100%;padding:7px 10px;border:1px solid #ddd;border-radius:6px;box-sizing:border-box;font-size:0.88em;">
+                    <option value="">読み込み中...</option>
+                </select>
+                <div id="glmCouponHint" style="font-size:0.78em;color:#aaa;margin-top:6px;"></div>
+            </div>
+
             <!-- AIパネル -->
             <div id="glmAiPanel" style="display:none;background:#f8f7ff;border:1px solid #e0d7ff;border-radius:8px;padding:14px;margin-bottom:14px;">
                 <div style="font-size:0.85em;font-weight:600;color:#764ba2;margin-bottom:10px;">✨ AI文章生成</div>
@@ -75,7 +87,43 @@
 </footer>
 
 <script>
-let _glmLineUserId = '', _glmCustomerName = '', _glmAiTone = '';
+let _glmLineUserId = '', _glmCustomerName = '', _glmAiTone = '', _glmCouponLoaded = false;
+
+// ── クーポン添付 ──────────────────────────────────────
+function toggleGlmCouponPanel() {
+    const on = document.getElementById('glmCouponToggle').checked;
+    document.getElementById('glmCouponPanel').style.display = on ? 'block' : 'none';
+    if (on && !_glmCouponLoaded) loadGlmCoupons();
+}
+async function loadGlmCoupons() {
+    const sel  = document.getElementById('glmCouponSelect');
+    const hint = document.getElementById('glmCouponHint');
+    sel.innerHTML = '<option value="">読み込み中...</option>';
+    try {
+        const res = await fetch(`<?= adminUrl('api/list_coupons.php') ?>?line_user_id=${encodeURIComponent(_glmLineUserId)}`);
+        const d = await res.json();
+        if (!d.success) throw new Error(d.error || '取得に失敗しました');
+        _glmCouponLoaded = true;
+        let html = '<option value="">-- クーポンを選択 --</option>';
+        if (d.owned.length) {
+            html += '<optgroup label="保有クーポン（未使用）">' +
+                d.owned.map(c => `<option value="owned:${c.id}">${esc(c.label)}</option>`).join('') + '</optgroup>';
+        }
+        if (d.issuable.length) {
+            html += '<optgroup label="新規発行">' +
+                d.issuable.map(t => `<option value="issue:${t.id}">${esc(t.label)}</option>`).join('') + '</optgroup>';
+        }
+        if (!d.owned.length && !d.issuable.length) html = '<option value="">選択できるクーポンがありません</option>';
+        sel.innerHTML = html;
+        hint.textContent = '「新規発行」を選ぶとその場でクーポンが発行され、メッセージと一緒に送信されます。';
+    } catch (e) {
+        sel.innerHTML = '<option value="">読み込み失敗</option>';
+        hint.textContent = e.message || 'クーポン一覧の取得に失敗しました';
+    }
+}
+function esc(s) {
+    return String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 
 function openLineModal(lineUserId, name, type, code, desc, discount, expiry) {
     _glmLineUserId = lineUserId; _glmCustomerName = name;
@@ -104,6 +152,12 @@ function openLineModal(lineUserId, name, type, code, desc, discount, expiry) {
     document.getElementById('glmText').value = text;
     document.getElementById('glmAiPurpose').value = purpose;
     updateGlmCount();
+    // クーポン添付パネルをリセット
+    document.getElementById('glmCouponToggle').checked = false;
+    document.getElementById('glmCouponPanel').style.display = 'none';
+    document.getElementById('glmCouponSelect').innerHTML = '<option value="">読み込み中...</option>';
+    document.getElementById('glmCouponHint').textContent = '';
+    _glmCouponLoaded = false;
     const m = document.getElementById('globalLineModal');
     m.style.display = 'flex'; m.style.alignItems = 'center'; m.style.justifyContent = 'center';
 }
@@ -125,14 +179,29 @@ function sendGlobalLineMessage() {
     const text = document.getElementById('glmText').value.trim();
     if (!text) { alert('メッセージを入力してください'); return; }
     if (!_glmLineUserId) { alert('送信先のLINEユーザーIDが取得できません'); return; }
+
+    let couponMode = '', couponRefId = 0;
+    if (document.getElementById('glmCouponToggle').checked) {
+        const val = document.getElementById('glmCouponSelect').value;
+        if (!val) { alert('添付するクーポンを選択してください'); return; }
+        [couponMode, couponRefId] = val.split(':');
+    }
+
     const csrf = document.getElementById('globalCsrfToken')?.value || '';
+    const btn  = document.querySelector('#globalLineModal button[onclick="sendGlobalLineMessage()"]');
+    if (btn) { btn.disabled = true; btn.textContent = '送信中...'; }
     fetch('<?= adminUrl('send_line.php') ?>', {
         method: 'POST', headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ line_user_id: _glmLineUserId, message: text, csrf_token: csrf })
+        body: JSON.stringify({
+            line_user_id: _glmLineUserId, message: text, csrf_token: csrf,
+            coupon_mode: couponMode, coupon_ref_id: couponRefId,
+        })
     }).then(r => r.json()).then(data => {
         const el = document.getElementById('glmResult');
         if (data.success) { el.innerHTML = '<div class="alert alert-success">✅ 送信しました！</div>'; setTimeout(closeGlobalLineModal, 1500); }
         else { el.innerHTML = '<div class="alert alert-danger">❌ ' + (data.error||'送信失敗') + '</div>'; }
+    }).finally(() => {
+        if (btn) { btn.disabled = false; btn.textContent = '📱 送信する'; }
     });
 }
 document.getElementById('globalLineModal').addEventListener('click', function(e) { if (e.target===this) closeGlobalLineModal(); });

@@ -172,7 +172,7 @@ $todayProductStmt = $db->prepare("
     SELECT ps.sold_at, ps.quantity, ps.price,
            p.name AS product_name, p.maker,
            c.name AS customer_name, ps.customer_id,
-           r.id AS reservation_id,
+           r.id AS reservation_id, r.start_at AS reservation_start_at,
            s.name AS staff_name
     FROM product_sales ps
     JOIN products p ON ps.product_id = p.id
@@ -180,7 +180,7 @@ $todayProductStmt = $db->prepare("
     LEFT JOIN reservations r ON ps.reservation_id = r.id
     LEFT JOIN staff s ON r.staff_id = s.id
     WHERE DATE(ps.sold_at) = ?
-    ORDER BY ps.sold_at
+    ORDER BY COALESCE(r.start_at, ps.sold_at)
 ");
 $todayProductStmt->execute([$today]);
 $todayProductList = $todayProductStmt->fetchAll();
@@ -340,6 +340,7 @@ include __DIR__ . '/_header.php';
             ?>
             <a href="?year=<?= $prevY ?>&month=<?= $prevM ?>&day=<?= sprintf('%04d-%02d-%02d',$prevY,$prevM,min($dailyDay??1,date('t',mktime(0,0,0,$prevM,1,$prevY)))) ?>" class="btn btn-sm btn-secondary">＜前月</a>
             <a href="?year=<?= (int)date('Y',strtotime($prevDayTop)) ?>&month=<?= (int)date('m',strtotime($prevDayTop)) ?>&day=<?= $prevDayTop ?>" class="btn btn-sm btn-secondary">＜前日</a>
+            <a href="?year=<?= date('Y') ?>&month=<?= date('m') ?>&day=<?= date('Y-m-d') ?>" class="btn btn-sm btn-primary">今日</a>
             <a href="?year=<?= (int)date('Y',strtotime($nextDayTop)) ?>&month=<?= (int)date('m',strtotime($nextDayTop)) ?>&day=<?= $nextDayTop ?>" class="btn btn-sm btn-secondary">翌日＞</a>
             <a href="?year=<?= $nextY ?>&month=<?= $nextM ?>&day=<?= sprintf('%04d-%02d-%02d',$nextY,$nextM,min($dailyDay??1,date('t',mktime(0,0,0,$nextM,1,$nextY)))) ?>" class="btn btn-sm btn-secondary">翌月＞</a>
         </form>
@@ -798,18 +799,19 @@ $nextMonthUrl = '?year='.(int)date('Y',strtotime($nextMonthDay)).'&month='.(int)
 <!-- 今日のKPI -->
 <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:20px;">
     <?php
+    $rsvListUrl = adminUrl('reservations.php') . '?date=' . $dailyDate;
     $todayKpis = [
-        ['label'=>'総売上',    'value'=>'¥'.number_format($todayTotal),       'color'=>'#6B9E8A'],
-        ['label'=>'来店数',    'value'=>$todayVisits.'名',                     'color'=>'#3498DB'],
-        ['label'=>'施術売上',  'value'=>'¥'.number_format($todayMenuSales),    'color'=>'#8e44ad'],
-        ['label'=>'物販売上',  'value'=>'¥'.number_format($todayProductSales), 'color'=>'#e67e22'],
-        ['label'=>'物販点数',  'value'=>$todayProductQty.'点',                 'color'=>'#27ae60'],
+        ['label'=>'総売上',    'value'=>'¥'.number_format($todayTotal),       'color'=>'#6B9E8A', 'href'=>$rsvListUrl],
+        ['label'=>'来店数',    'value'=>$todayVisits.'名',                     'color'=>'#3498DB', 'href'=>$rsvListUrl],
+        ['label'=>'施術売上',  'value'=>'¥'.number_format($todayMenuSales),    'color'=>'#8e44ad', 'href'=>'#dailyMenuList'],
+        ['label'=>'物販売上',  'value'=>'¥'.number_format($todayProductSales), 'color'=>'#e67e22', 'href'=>'#dailyProductList'],
+        ['label'=>'物販点数',  'value'=>$todayProductQty.'点',                 'color'=>'#27ae60', 'href'=>'#dailyProductList'],
     ];
     foreach ($todayKpis as $k): ?>
-    <div class="stat-card" style="text-align:center;">
+    <a href="<?= h($k['href']) ?>" class="stat-card" style="text-align:center;">
         <div style="font-size:1.6em;font-weight:bold;color:<?= $k['color'] ?>;"><?= $k['value'] ?></div>
         <div style="font-size:0.85em;color:#555;margin-top:6px;font-weight:600;"><?= $k['label'] ?></div>
-    </div>
+    </a>
     <?php endforeach; ?>
 </div>
 
@@ -818,7 +820,7 @@ $nextMonthUrl = '?year='.(int)date('Y',strtotime($nextMonthDay)).'&month='.(int)
 $completedCount = count(array_filter($todayMenuList, fn($r) => $r['status'] === 'completed'));
 $confirmedCount = count(array_filter($todayMenuList, fn($r) => $r['status'] === 'confirmed'));
 ?>
-<div class="card">
+<div class="card" id="dailyMenuList" style="scroll-margin-top:20px;">
     <div class="card-header">
         ✂️ 施術一覧（<?= count($todayMenuList) ?>件
         <?php if ($confirmedCount > 0): ?>
@@ -830,17 +832,21 @@ $confirmedCount = count(array_filter($todayMenuList, fn($r) => $r['status'] === 
     <?php if (empty($todayMenuList)): ?>
         <p style="padding:20px;color:#888;text-align:center;">施術の記録はありません</p>
     <?php else: ?>
-        <table>
-            <tr><th>時間</th><th>お客様</th><th>メニュー</th><th>金額</th><th>担当</th><th>状態</th></tr>
+        <table style="table-layout:fixed;">
+            <colgroup>
+                <col style="width:70px"><col style="width:160px"><col><col style="width:110px"><col style="width:110px"><col style="width:80px">
+            </colgroup>
+            <tr><th>時間</th><th>お客様</th><th>メニュー</th><th style="text-align:right;">金額</th><th>担当</th><th>状態</th></tr>
             <?php foreach ($todayMenuList as $r):
                 $isDone = $r['status'] === 'completed';
                 $rowStyle = $isDone ? '' : 'background:#f0f7ff;';
+                $detailUrl = adminUrl('reservation_detail.php') . '?id=' . $r['id'];
             ?>
-            <tr style="<?= $rowStyle ?>">
+            <tr style="<?= $rowStyle ?>cursor:pointer;" onclick="location.href='<?= h($detailUrl) ?>'">
                 <td style="white-space:nowrap;color:#888;font-size:0.88em;"><?= h(date('H:i', strtotime($r['start_at']))) ?></td>
-                <td><a href="<?= adminUrl('reservation_detail.php') ?>?id=<?= $r['id'] ?>" style="color:#3498db;text-decoration:none;font-weight:bold;"><?= h($r['customer_name']) ?>様</a></td>
+                <td><a href="<?= h($detailUrl) ?>" style="color:#3498db;text-decoration:none;font-weight:bold;"><?= h($r['customer_name']) ?>様</a></td>
                 <td><?= h($r['menu_name']) ?></td>
-                <td style="font-weight:bold;"><?= $isDone ? '¥'.number_format($r['price']) : '<span style="color:#aaa;">¥'.number_format($r['price']).'</span>' ?></td>
+                <td style="font-weight:bold;text-align:right;"><?= $isDone ? '¥'.number_format($r['price']) : '<span style="color:#aaa;">¥'.number_format($r['price']).'</span>' ?></td>
                 <td style="color:#6B9E8A;"><?= h($r['staff_name'] ?? '未定') ?></td>
                 <td>
                     <?php if ($isDone): ?>
@@ -853,7 +859,7 @@ $confirmedCount = count(array_filter($todayMenuList, fn($r) => $r['status'] === 
             <?php endforeach; ?>
             <tr style="background:#f0faf4;font-weight:bold;border-top:2px solid #eee;">
                 <td colspan="3" style="padding:8px 12px;text-align:right;color:#888;">施術合計（完了分）</td>
-                <td style="padding:8px 12px;color:#6B9E8A;">¥<?= number_format($todayMenuSales) ?></td>
+                <td style="padding:8px 12px;text-align:right;color:#6B9E8A;">¥<?= number_format($todayMenuSales) ?></td>
                 <td colspan="2"></td>
             </tr>
         </table>
@@ -862,33 +868,39 @@ $confirmedCount = count(array_filter($todayMenuList, fn($r) => $r['status'] === 
 </div>
 
 <!-- 今日の物販一覧 -->
-<div class="card">
+<div class="card" id="dailyProductList" style="scroll-margin-top:20px;">
     <div class="card-header">🛍️ 今日の物販（<?= $todayProductQty ?>点）</div>
     <div class="card-body" style="padding:0;">
     <?php if (empty($todayProductList)): ?>
         <p style="padding:20px;color:#888;text-align:center;">物販の記録はありません</p>
     <?php else: ?>
-        <table>
-            <tr><th>お客様</th><th>商品</th><th>数量</th><th>金額</th><th>担当</th></tr>
-            <?php foreach ($todayProductList as $p): ?>
-            <tr>
+        <table style="table-layout:fixed;">
+            <colgroup>
+                <col style="width:70px"><col style="width:160px"><col><col style="width:110px"><col style="width:110px"><col style="width:80px">
+            </colgroup>
+            <tr><th>時間</th><th>お客様</th><th>商品</th><th style="text-align:right;">金額</th><th>担当</th><th>状態</th></tr>
+            <?php foreach ($todayProductList as $p):
+                $prodDetailUrl = $p['reservation_id'] ? (adminUrl('reservation_detail.php') . '?id=' . $p['reservation_id']) : '';
+            ?>
+            <tr<?php if ($prodDetailUrl): ?> style="cursor:pointer;" onclick="location.href='<?= h($prodDetailUrl) ?>'"<?php endif; ?>>
+                <td style="color:#888;font-size:0.88em;"><?= $p['reservation_start_at'] ? h(date('H:i', strtotime($p['reservation_start_at']))) : '-' ?></td>
                 <td>
-                <?php if ($p['reservation_id']): ?>
-                    <a href="<?= adminUrl('reservation_detail.php') ?>?id=<?= $p['reservation_id'] ?>" style="color:#3498db;text-decoration:none;font-weight:bold;"><?= h($p['customer_name']) ?>様</a>
+                <?php if ($prodDetailUrl): ?>
+                    <a href="<?= h($prodDetailUrl) ?>" style="color:#3498db;text-decoration:none;font-weight:bold;"><?= h($p['customer_name']) ?>様</a>
                 <?php else: ?>
                     <?= h($p['customer_name']) ?>様
                 <?php endif; ?>
                 </td>
-                <td><?= h($p['product_name']) ?><?php if ($p['maker']): ?> <span style="color:#aaa;font-size:0.82em;">/<?= h($p['maker']) ?></span><?php endif; ?></td>
-                <td><?= h($p['quantity']) ?>個</td>
-                <td style="font-weight:bold;">¥<?= number_format($p['price'] * $p['quantity']) ?></td>
+                <td><?= h($p['product_name']) ?> ×<?= h($p['quantity']) ?><?php if ($p['maker']): ?> <span style="color:#aaa;font-size:0.82em;">/<?= h($p['maker']) ?></span><?php endif; ?></td>
+                <td style="font-weight:bold;text-align:right;">¥<?= number_format($p['price'] * $p['quantity']) ?></td>
                 <td style="color:#6B9E8A;"><?= h($p['staff_name'] ?? '未定') ?></td>
+                <td><span style="background:#e8f5f0;color:#6B9E8A;font-size:0.78em;padding:2px 8px;border-radius:10px;font-weight:bold;">完了</span></td>
             </tr>
             <?php endforeach; ?>
             <tr style="background:#fff8f0;font-weight:bold;border-top:2px solid #eee;">
                 <td colspan="3" style="padding:8px 12px;text-align:right;color:#888;">物販合計</td>
-                <td style="padding:8px 12px;color:#e67e22;">¥<?= number_format($todayProductSales) ?></td>
-                <td></td>
+                <td style="padding:8px 12px;text-align:right;color:#e67e22;">¥<?= number_format($todayProductSales) ?></td>
+                <td colspan="2"></td>
             </tr>
         </table>
     <?php endif; ?>

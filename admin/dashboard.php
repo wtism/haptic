@@ -764,6 +764,38 @@ $csvUrl = adminUrl('dashboard.php') . '?action=birthday_csv&bdy='.$bdayYear.'&bd
 <script>
 // ── カレンダーモーダル ───────────────────────────────
 const _viewDate = '<?= $viewDate ?>';
+
+// ── 自動更新：LINE等での新規予約・変更を検知して自動リロード ──
+(function () {
+    let currentSig = null;
+    const POLL_MS = 5000;
+
+    function isBusy() {
+        // モーダル表示中・入力中はリロードで邪魔しない
+        const modals = ['calModal', 'newResvModal'];
+        for (const id of modals) {
+            const el = document.getElementById(id);
+            if (el && getComputedStyle(el).display !== 'none') return true;
+        }
+        const active = document.activeElement;
+        if (active && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) return true;
+        return false;
+    }
+
+    async function poll() {
+        try {
+            const res = await fetch(`<?= adminUrl('api/dashboard_check.php') ?>?date=${encodeURIComponent(_viewDate)}`, { cache: 'no-store' });
+            const d = await res.json();
+            if (!d.success) return;
+            if (currentSig === null) { currentSig = d.sig; return; }
+            if (d.sig !== currentSig) {
+                if (isBusy()) return; // 次回ポーリングで再チェック
+                location.reload();
+            }
+        } catch (e) { /* 通信エラーは無視して次回再試行 */ }
+    }
+    setInterval(poll, POLL_MS);
+})();
 const SHOP_CLOSE_TIME = '<?php
     try { echo h(substr($db->query("SELECT close_time FROM shop_settings WHERE id=1")->fetchColumn() ?: "19:00:00", 0, 5)); }
     catch (Throwable $e) { echo "19:00"; }
