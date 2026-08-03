@@ -38,7 +38,7 @@ $staffAll = $db->query('SELECT * FROM staff WHERE is_active=1 ORDER BY display_o
 // 在庫アラート（販売中のみ）
 $stockAlerts = $db->query("
     SELECT * FROM products
-    WHERE is_active=1 AND status='active' AND alert_enabled=1 AND stock <= stock_alert
+    WHERE is_active=1 AND status='active' AND stock <= stock_alert
     ORDER BY item_type, stock ASC
     LIMIT 20
 ")->fetchAll();

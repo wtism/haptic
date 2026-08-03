@@ -28,15 +28,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($action === 'add') {
         $db->prepare('
-            INSERT INTO products (name, item_type, maker, category, price, cost_price, stock, stock_alert, alert_enabled, unit, sku, display_order, is_active, status)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?)
+            INSERT INTO products (name, item_type, maker, category, price, cost_price, stock, stock_alert, unit, sku, display_order, is_active, status)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?)
         ')->execute([
             $_POST['name'], $_POST['item_type'] ?: 'product',
             $_POST['maker'] ?: null, $_POST['category'],
             (int)$_POST['price'],
             $_POST['cost_price'] !== '' ? (int)$_POST['cost_price'] : null,
             (int)$_POST['stock'], (int)$_POST['stock_alert'],
-            isset($_POST['alert_enabled']) ? 1 : 0,
             $_POST['unit'] ?: '個', $_POST['sku'] ?: null,
             (int)$_POST['display_order'],
             $_POST['status'] ?: 'active',
@@ -47,7 +46,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if ($action === 'update') {
         $db->prepare('
             UPDATE products SET name=?, item_type=?, maker=?, category=?, price=?, cost_price=?,
-                stock_alert=?, alert_enabled=?, unit=?, sku=?, display_order=?, is_active=?, status=?
+                stock_alert=?, unit=?, sku=?, display_order=?, is_active=?, status=?
             WHERE id=?
         ')->execute([
             $_POST['name'], $_POST['item_type'] ?: 'product',
@@ -55,7 +54,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             (int)$_POST['price'],
             $_POST['cost_price'] !== '' ? (int)$_POST['cost_price'] : null,
             (int)$_POST['stock_alert'],
-            isset($_POST['alert_enabled']) ? 1 : 0,
             $_POST['unit'] ?: '個', $_POST['sku'] ?: null,
             (int)$_POST['display_order'],
             isset($_POST['is_active']) ? 1 : 0,
@@ -66,15 +64,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
 
-
-    // 在庫アラートのON/OFFをワンクリックで切り替え
-    if ($action === 'toggle_alert') {
-        $db->prepare('UPDATE products SET alert_enabled = 1 - alert_enabled WHERE id=?')->execute([(int)$_POST['id']]);
-        $stmt = $db->prepare('SELECT alert_enabled FROM products WHERE id=?');
-        $stmt->execute([(int)$_POST['id']]);
-        $msgKey = $stmt->fetchColumn() ? 'alert_on' : 'alert_off';
-        header('Location: ' . adminUrl('products.php') . '?msg=' . $msgKey . '&tab=' . ($_POST['tab'] ?: 'product')); exit;
-    }
 
     if ($action === 'delete') {
         $stmt = $db->prepare('SELECT COUNT(*) FROM product_sales WHERE product_id=?');
@@ -93,8 +82,7 @@ $msgMap = [
     'updated'       => '更新しました',
     'deleted'       => '削除しました',
     'deactivated'   => '販売履歴があるため無効化しました',
-    'alert_on'      => '在庫アラートをONにしました',
-    'alert_off'     => '在庫アラートをOFFにしました',
+
 ];
 if (isset($msgMap[$_GET['msg'] ?? ''])) {
     $msg = $msgMap[$_GET['msg']];
@@ -168,34 +156,16 @@ foreach ($currentList as $p):
             </div>
             <?php if ($p['status'] === 'active'): ?>
             <?php
-            $alertOn    = !empty($p['alert_enabled']);
-            $stockColor = !$alertOn
-                ? '#e9ecef;color:#6c757d'
-                : ($p['stock'] <= 0 ? '#f8d7da;color:#721c24' : ($p['stock'] <= $p['stock_alert'] ? '#fff3cd;color:#856404' : '#d4edda;color:#155724'));
+            $stockColor = $p['stock'] <= 0 ? '#f8d7da;color:#721c24' : ($p['stock'] <= $p['stock_alert'] ? '#fff3cd;color:#856404' : '#d4edda;color:#155724');
             ?>
             <a href="<?= adminUrl('stock.php') ?>?product_id=<?= $p['id'] ?>" style="text-decoration:none;">
                 <span style="background:<?= $stockColor ?>;padding:2px 10px;border-radius:12px;font-size:0.85em;font-weight:bold;">
                     在庫 <?= $p['stock'] ?><?= h($p['unit']) ?>
                 </span>
             </a>
-            <?php if (!$alertOn): ?>
-            <span style="background:#e9ecef;color:#6c757d;padding:2px 8px;border-radius:12px;font-size:0.78em;margin-left:4px;">🔕 アラートOFF</span>
-            <?php endif; ?>
             <?php endif; ?>
         </div>
         <div style="display:flex;gap:6px;">
-            <?php if ($p['status'] === 'active'): ?>
-            <form method="post" style="display:inline;">
-                <input type="hidden" name="csrf_token" value="<?= csrf() ?>">
-                <input type="hidden" name="action" value="toggle_alert">
-                <input type="hidden" name="id" value="<?= $p['id'] ?>">
-                <input type="hidden" name="tab" value="<?= h($activeTab) ?>">
-                <button class="btn btn-sm btn-secondary view-only" type="submit"
-                        title="<?= empty($p['alert_enabled']) ? '在庫アラートを出すようにする' : '在庫アラートを出さないようにする' ?>">
-                    <?= empty($p['alert_enabled']) ? '🔕 アラートOFF' : '🔔 アラートON' ?>
-                </button>
-            </form>
-            <?php endif; ?>
             <button class="btn btn-sm btn-secondary view-only" onclick="setMode('prod<?= $p['id'] ?>','edit')">✏️ 編集</button>
             <button class="btn btn-sm btn-secondary edit-only" onclick="setMode('prod<?= $p['id'] ?>','view')">キャンセル</button>
             <form method="post" style="display:inline;" onsubmit="return confirm('削除しますか？')">
@@ -234,8 +204,7 @@ foreach ($currentList as $p):
                     </select>
                 </div>
                 <div>
-                    <label style="font-weight:normal;display:flex;align-items:center;gap:4px;margin-bottom:2px;"><input type="checkbox" name="is_active" <?= $p['is_active']?'checked':'' ?>> 有効</label>
-                    <label style="font-weight:normal;display:flex;align-items:center;gap:4px;margin-bottom:6px;" title="OFFにすると在庫が少なくても警告を出しません"><input type="checkbox" name="alert_enabled" <?= !empty($p['alert_enabled'])?'checked':'' ?>> 在庫アラート</label>
+                    <label style="font-weight:normal;display:flex;align-items:center;gap:4px;margin-bottom:6px;"><input type="checkbox" name="is_active" <?= $p['is_active']?'checked':'' ?>> 有効</label>
                     <button class="btn btn-primary btn-sm" type="submit">保存</button>
                 </div>
             </div>
@@ -269,9 +238,6 @@ foreach ($currentList as $p):
                 <?php else: ?><input type="hidden" name="price" value="0"><?php endif; ?>
                 <div class="form-group" style="margin:0;"><label>仕入値</label><input type="number" name="cost_price" placeholder="-"></div>
                 <div class="form-group" style="margin:0;"><label>アラート数</label><input type="number" name="stock_alert" value="5" min="0"></div>
-                <div class="form-group" style="margin:0;"><label>アラート</label>
-                    <label style="font-weight:normal;display:flex;align-items:center;gap:4px;height:38px;" title="OFFにすると在庫が少なくても警告を出しません"><input type="checkbox" name="alert_enabled" checked> 出す</label>
-                </div>
                 <div class="form-group" style="margin:0;"><label>単位</label>
                     <select name="unit"><?php foreach ($unitOptions as $u): ?><option value="<?= $u ?>"><?= $u ?></option><?php endforeach; ?></select>
                 </div>
