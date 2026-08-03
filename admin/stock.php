@@ -49,6 +49,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: ' . adminUrl('stock.php') . '?msg=stock_adjusted&product_id=' . $productId); exit;
     }
 
+    // 在庫アラートの表示ON/OFF（店舗全体）
+    if ($action === 'toggle_stock_alert') {
+        $db->exec('UPDATE shop_settings SET stock_alert_enabled = 1 - stock_alert_enabled, updated_at=NOW() WHERE id=1');
+        $on = (int)$db->query('SELECT stock_alert_enabled FROM shop_settings WHERE id=1')->fetchColumn();
+        auditLog('update', 'shop_settings', 1, '在庫アラート：' . ($on ? 'ON' : 'OFF'));
+        header('Location: ' . adminUrl('stock.php') . '?msg=' . ($on ? 'alert_on' : 'alert_off')); exit;
+    }
+
     // 入荷削除（在庫も戻す）
     if ($action === 'delete_purchase') {
         $purchaseId = (int)$_POST['id'];
@@ -64,7 +72,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-$msgMap = ['added'=>'入荷を登録しました','deleted'=>'入荷記録を削除しました','stock_adjusted'=>'在庫数を更新しました'];
+$msgMap = ['added'=>'入荷を登録しました','deleted'=>'入荷記録を削除しました','stock_adjusted'=>'在庫数を更新しました',
+           'alert_on'=>'在庫アラートをONにしました','alert_off'=>'在庫アラートをOFFにしました'];
 if (isset($msgMap[$_GET['msg'] ?? ''])) { $msg = $msgMap[$_GET['msg']]; if ($_GET['msg']==='deleted') $msgType='danger'; }
 
 // 絞り込み
@@ -90,8 +99,9 @@ $stmt = $db->prepare("
 $stmt->execute($params);
 $purchases = $stmt->fetchAll();
 
-// 在庫アラート
-$stockAlerts = $db->query("
+// 在庫アラート（店舗設定でOFFなら表示しない）
+$stockAlertEnabled = (int)$db->query('SELECT stock_alert_enabled FROM shop_settings WHERE id=1')->fetchColumn();
+$stockAlerts = !$stockAlertEnabled ? [] : $db->query("
     SELECT * FROM products
     WHERE is_active=1 AND status='active' AND stock <= stock_alert
     ORDER BY item_type, stock ASC
@@ -116,8 +126,23 @@ $pageTitle = '在庫・入荷管理';
 include __DIR__ . '/_header.php';
 ?>
 
-<div class="page-title">在庫・入荷管理（LOT管理）</div>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+    <div class="page-title" style="margin:0;">在庫・入荷管理（LOT管理）</div>
+    <form method="post" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="<?= csrf() ?>">
+        <input type="hidden" name="action" value="toggle_stock_alert">
+        <button class="btn btn-sm btn-secondary" type="submit"
+                title="<?= $stockAlertEnabled ? '在庫アラートを表示しないようにする' : '在庫アラートを表示するようにする' ?>">
+            <?= $stockAlertEnabled ? '🔔 在庫アラート ON' : '🔕 在庫アラート OFF' ?>
+        </button>
+    </form>
+</div>
 <?php if ($msg): ?><div class="alert alert-<?= $msgType ?>"><?= h($msg) ?></div><?php endif; ?>
+<?php if (!$stockAlertEnabled): ?>
+<div class="alert alert-secondary" style="background:#e9ecef;color:#6c757d;border:1px solid #dee2e6;">
+    🔕 在庫アラートは現在OFFです（ダッシュボードにも表示されません）。上のボタン、または<a href="<?= adminUrl('shop.php') ?>">店舗設定</a>からONにできます。
+</div>
+<?php endif; ?>
 
 <?php if (!empty($stockAlerts)): ?>
 <div class="alert alert-danger" style="display:flex;align-items:flex-start;gap:12px;">

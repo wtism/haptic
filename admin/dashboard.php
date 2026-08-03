@@ -35,8 +35,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'dashb
 $menus    = $db->query('SELECT * FROM menus WHERE is_active=1 ORDER BY display_order')->fetchAll();
 $staffAll = $db->query('SELECT * FROM staff WHERE is_active=1 ORDER BY display_order')->fetchAll();
 
-// 在庫アラート（販売中のみ）
-$stockAlerts = $db->query("
+// 在庫アラート（販売中のみ・店舗設定でOFFなら非表示）
+$stockAlertEnabled = (int)$db->query('SELECT stock_alert_enabled FROM shop_settings WHERE id=1')->fetchColumn();
+$stockAlerts = !$stockAlertEnabled ? [] : $db->query("
     SELECT * FROM products
     WHERE is_active=1 AND status='active' AND stock <= stock_alert
     ORDER BY item_type, stock ASC

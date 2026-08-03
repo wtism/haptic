@@ -19,7 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $db->prepare('
             UPDATE shop_settings SET
                 shop_name=?, postal_code=?, address1=?, address2=?, address3=?,
-                phone=?, web_url=?, email=?, line_id=?, regular_holidays=?, open_time=?, close_time=?, fortune_enabled=?, updated_at=NOW()
+                phone=?, web_url=?, email=?, line_id=?, regular_holidays=?, open_time=?, close_time=?, fortune_enabled=?, stock_alert_enabled=?, updated_at=NOW()
             WHERE id=1
         ')->execute([
             $_POST['shop_name'], $_POST['postal_code'] ?: null,
@@ -29,6 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $regularHolidays ?: '2',
             $openTime . ':00', $closeTime . ':00',
             isset($_POST['fortune_enabled']) ? 1 : 0,
+            isset($_POST['stock_alert_enabled']) ? 1 : 0,
         ]);
         header('Location: ' . adminUrl('shop.php') . '?msg=updated'); exit;
     }
@@ -116,6 +117,13 @@ include __DIR__ . '/_header.php';
                 <label style="font-weight:normal;display:flex;align-items:center;gap:8px;margin-top:6px;cursor:pointer;">
                     <input type="checkbox" name="fortune_enabled" <?= !empty($shop['fortune_enabled'])?'checked':'' ?>>
                     <span>✨ 当日予約の詳細を開いたとき、お客様の今日の運勢を表示する</span>
+                </label>
+            </div>
+            <div class="form-group">
+                <label>在庫アラート（商品・資材の在庫が少ないときの警告）</label>
+                <label style="font-weight:normal;display:flex;align-items:center;gap:8px;margin-top:6px;cursor:pointer;">
+                    <input type="checkbox" name="stock_alert_enabled" <?= !empty($shop['stock_alert_enabled'])?'checked':'' ?>>
+                    <span>🔔 ダッシュボードと在庫管理に在庫アラートを表示する</span>
                 </label>
             </div>
             <button class="btn btn-primary" type="submit">更新する</button>
