@@ -26,7 +26,12 @@ $msgMap = ['updated'=>'更新しました','added'=>'追加しました'];
 if (isset($msgMap[$_GET['msg'] ?? ''])) $msg = $msgMap[$_GET['msg']];
 
 $menus = $db->query('SELECT * FROM menus ORDER BY display_order')->fetchAll();
-$categories = ['cut'=>'カット','color'=>'カラー','perm'=>'パーマ','treatment'=>'トリートメント','other'=>'その他'];
+
+// カテゴリはDBの実データ（日本語）と揃える。既存データにある値も取りこぼさないよう合成する
+$categories = ['カット'=>'カット','カラー'=>'カラー','パーマ'=>'パーマ','ストレート'=>'ストレート','トリートメント'=>'トリートメント','その他'=>'その他'];
+foreach ($db->query('SELECT DISTINCT category FROM menus') as $c) {
+    if ($c['category'] !== '' && !isset($categories[$c['category']])) $categories[$c['category']] = $c['category'];
+}
 $pageTitle = 'メニュー管理';
 include __DIR__ . '/_header.php';
 ?>
@@ -36,15 +41,23 @@ include __DIR__ . '/_header.php';
 
 <?php foreach ($menus as $m): ?>
 <div class="card" id="menu<?= $m['id'] ?>">
-    <div class="card-header">
-        <div>
-            <span style="font-weight:bold;"><?= h($m['name']) ?></span>
-            <span style="font-size:0.82em;color:#888;margin-left:8px;">
-                <?= h($categories[$m['category']] ?? $m['category']) ?> · <?= $m['duration_min'] ?>分 · ¥<?= number_format($m['price']) ?>
+    <div class="card-header" style="align-items:center;">
+        <div style="display:flex;align-items:center;gap:12px;min-width:0;">
+            <span style="font-size:1.1em;line-height:1;" title="<?= $m['is_active'] ? '有効（予約画面に表示）' : '無効（予約画面に表示されません）' ?>">
+                <?= $m['is_active'] ? '🟢' : '⚪' ?>
             </span>
-            <?= $m['is_active'] ? '' : '<span style="color:#999;font-size:0.8em;margin-left:6px;">（無効）</span>' ?>
+            <div style="min-width:0;">
+                <div style="font-weight:bold;font-size:1.08em;color:<?= $m['is_active'] ? '#222' : '#999' ?>;">
+                    <?= h($m['name']) ?><?= $m['is_active'] ? '' : '<span style="font-weight:normal;font-size:0.8em;margin-left:6px;">（無効）</span>' ?>
+                </div>
+                <div style="color:#222;font-size:0.92em;margin-top:3px;">
+                    <?= h($categories[$m['category']] ?? $m['category']) ?>
+                    ／ <?= $m['duration_min'] ?>分
+                    ／ ¥<?= number_format($m['price']) ?>
+                </div>
+            </div>
         </div>
-        <div>
+        <div style="flex-shrink:0;">
             <button class="btn btn-sm btn-secondary view-only" onclick="setMode('menu<?= $m['id'] ?>','edit')">✏️ 編集</button>
             <button class="btn btn-sm btn-secondary edit-only" onclick="setMode('menu<?= $m['id'] ?>','view')">キャンセル</button>
         </div>
