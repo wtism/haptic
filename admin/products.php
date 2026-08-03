@@ -65,6 +65,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 
 
+    // 在庫アラートの表示ON/OFF（店舗全体）
+    if ($action === 'toggle_stock_alert') {
+        $db->exec('UPDATE shop_settings SET stock_alert_enabled = 1 - stock_alert_enabled, updated_at=NOW() WHERE id=1');
+        $on = (int)$db->query('SELECT stock_alert_enabled FROM shop_settings WHERE id=1')->fetchColumn();
+        auditLog('update', 'shop_settings', 1, '在庫アラート：' . ($on ? 'ON' : 'OFF'));
+        header('Location: ' . adminUrl('products.php') . '?msg=' . ($on ? 'alert_on' : 'alert_off') . '&tab=' . ($_POST['tab'] ?: 'product')); exit;
+    }
+
     if ($action === 'delete') {
         $stmt = $db->prepare('SELECT COUNT(*) FROM product_sales WHERE product_id=?');
         $stmt->execute([(int)$_POST['id']]);
@@ -82,7 +90,8 @@ $msgMap = [
     'updated'       => '更新しました',
     'deleted'       => '削除しました',
     'deactivated'   => '販売履歴があるため無効化しました',
-
+    'alert_on'      => '在庫アラートをONにしました',
+    'alert_off'     => '在庫アラートをOFFにしました',
 ];
 if (isset($msgMap[$_GET['msg'] ?? ''])) {
     $msg = $msgMap[$_GET['msg']];
@@ -90,6 +99,7 @@ if (isset($msgMap[$_GET['msg'] ?? ''])) {
 }
 
 $activeTab = $_GET['tab'] ?? 'product';
+$stockAlertEnabled = (int)$db->query('SELECT stock_alert_enabled FROM shop_settings WHERE id=1')->fetchColumn();
 $products  = $db->query("SELECT * FROM products WHERE item_type='product' ORDER BY status, category, display_order")->fetchAll();
 $materials = $db->query("SELECT * FROM products WHERE item_type='material' ORDER BY status, category, display_order")->fetchAll();
 
@@ -99,11 +109,23 @@ $pageTitle = '商品・資材管理';
 include __DIR__ . '/_header.php';
 ?>
 
-<div class="page-title">商品・資材管理</div>
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+    <div class="page-title" style="margin:0;">商品・資材管理</div>
+    <form method="post" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="<?= csrf() ?>">
+        <input type="hidden" name="action" value="toggle_stock_alert">
+        <input type="hidden" name="tab" value="<?= h($activeTab) ?>">
+        <button class="btn btn-sm btn-secondary" type="submit"
+                title="<?= $stockAlertEnabled ? '在庫アラートを表示しないようにする' : '在庫アラートを表示するようにする' ?>">
+            <?= $stockAlertEnabled ? '🔔 在庫アラート ON' : '🔕 在庫アラート OFF' ?>
+        </button>
+    </form>
+</div>
 <?php if ($msg): ?><div class="alert alert-<?= $msgType ?>"><?= h($msg) ?></div><?php endif; ?>
 
 <div style="font-size:0.88em;color:#888;margin-bottom:14px;">
-    ※ 在庫数は<a href="<?= adminUrl('stock.php') ?>">在庫管理</a>から入荷登録で管理します
+    ※ 在庫数は<a href="<?= adminUrl('stock.php') ?>">在庫管理</a>から入荷登録で管理します<?php if (!$stockAlertEnabled): ?>
+    <span style="color:#6c757d;">／ 🔕 在庫アラートは現在OFFです</span><?php endif; ?>
 </div>
 
 <!-- タブ -->
